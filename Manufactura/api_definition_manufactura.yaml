@@ -1,0 +1,569 @@
+openapi: 3.0.3
+
+info:
+  title: API de Manufactura - CC6 Rol B
+  version: 1.0.0-propuesta
+  description: |
+    Propuesta unificada para contratos, disponibilidad y cotizaciones de Manufactura.
+
+    Mejoras adoptadas de los estándares de Eventos:
+    - identificadores integer/int64;
+    - operaciones GET de colección;
+    - componentes OpenAPI reutilizables;
+    - errores comunes con code y message;
+    - respuesta 422 para referencias inválidas;
+    - header Location en operaciones POST.
+
+    El contrato no contiene product_id. Los productos pertenecen a los detalles de
+    cada cotización o pedido, porque un contrato puede originar múltiples operaciones
+    con varios productos.
+
+    Pendientes de acuerdo intergrupal: idioma definitivo, estados definitivos,
+    obligatoriedad de JWT, alcance de PUT y timestamps.
+
+servers:
+  - url: https://manufactura.example.com/api
+    description: URL ilustrativa; reemplazar por la URL real del nodo de Manufactura.
+
+# JWT queda definido como componente, pero no se exige hasta aprobarlo entre grupos.
+security: []
+
+tags:
+  - name: Contratos
+  - name: Disponibilidad
+  - name: Cotizaciones
+
+paths:
+  /contrato_manufactura:
+    get:
+      tags: [Contratos]
+      summary: Listar contratos de Manufactura
+      operationId: listContratoManufactura
+      parameters:
+        - $ref: "#/components/parameters/ManufacturerIdQuery"
+        - $ref: "#/components/parameters/ClientIdQuery"
+        - $ref: "#/components/parameters/ContractStatusQuery"
+      responses:
+        "200":
+          description: Lista de contratos. Devuelve un arreglo vacío si no hay coincidencias.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ContratoManufactura"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "422":
+          $ref: "#/components/responses/InvalidReference"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    post:
+      tags: [Contratos]
+      summary: Crear un contrato de Manufactura
+      description: |
+        El servidor asigna contract_id y el estado inicial DRAFT. manufacturer_id y
+        client_id deben existir. start_date debe ser menor o igual que end_date.
+        product_id no se admite en el contrato.
+      operationId: postContratoManufactura
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ContratoManufacturaRequest"
+      responses:
+        "201":
+          description: Contrato creado.
+          headers:
+            Location:
+              $ref: "#/components/headers/Location"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContratoManufactura"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/InvalidReference"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /contrato_manufactura/{contract_id}:
+    parameters:
+      - $ref: "#/components/parameters/ContractId"
+    get:
+      tags: [Contratos]
+      summary: Obtener un contrato de Manufactura
+      operationId: getContratoManufactura
+      responses:
+        "200":
+          description: Contrato encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ContratoManufactura"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /disponible:
+    get:
+      tags: [Disponibilidad]
+      summary: Consultar productos disponibles
+      description: |
+        Devuelve productos activos cuya cantidad disponible sea igual o mayor que
+        quantity. Es una consulta informativa: no reserva inventario ni garantiza
+        existencias para un pedido posterior.
+      operationId: getDisponibleManufactura
+      parameters:
+        - $ref: "#/components/parameters/ManufacturerIdQuery"
+        - $ref: "#/components/parameters/ProductIdQuery"
+        - $ref: "#/components/parameters/QuantityQuery"
+      responses:
+        "200":
+          description: Resultado de disponibilidad.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AvailabilityResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "422":
+          $ref: "#/components/responses/InvalidReference"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /cotizacion_manufactura:
+    get:
+      tags: [Cotizaciones]
+      summary: Listar cotizaciones de Manufactura
+      operationId: listCotizacionManufactura
+      parameters:
+        - $ref: "#/components/parameters/ContractIdQuery"
+        - $ref: "#/components/parameters/QuotationStatusQuery"
+      responses:
+        "200":
+          description: Lista de cotizaciones. Devuelve un arreglo vacío si no hay coincidencias.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CotizacionManufactura"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "422":
+          $ref: "#/components/responses/InvalidReference"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    post:
+      tags: [Cotizaciones]
+      summary: Crear una cotización con uno o varios productos
+      description: |
+        La creación es atómica. El contrato debe existir, estar ACTIVE y encontrarse
+        vigente. Cada producto debe existir y pertenecer al fabricante del contrato.
+        El servidor asigna quotation_id, estado DRAFT, precios, subtotales y total.
+        La cotización no reserva inventario.
+      operationId: postCotizacionManufactura
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CotizacionManufacturaRequest"
+      responses:
+        "201":
+          description: Cotización creada.
+          headers:
+            Location:
+              $ref: "#/components/headers/Location"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CotizacionManufactura"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/InvalidReference"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /cotizacion_manufactura/{quotation_id}:
+    parameters:
+      - $ref: "#/components/parameters/QuotationId"
+    get:
+      tags: [Cotizaciones]
+      summary: Obtener una cotización de Manufactura
+      operationId: getCotizacionManufactura
+      responses:
+        "200":
+          description: Cotización encontrada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CotizacionManufactura"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+components:
+  schemas:
+    Id:
+      type: integer
+      format: int64
+      minimum: 1
+      maximum: 9007199254740991
+      description: Identificador numérico positivo asignado por el sistema propietario.
+
+    Error:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          minLength: 1
+          example: INVALID_REFERENCE
+        message:
+          type: string
+          minLength: 1
+          example: El producto indicado no pertenece al fabricante del contrato.
+
+    ContractStatus:
+      type: string
+      description: Estados provisionales pendientes de acuerdo intergrupal.
+      enum: [DRAFT, ACTIVE, SUSPENDED, EXPIRED, TERMINATED, CANCELLED]
+
+    QuotationStatus:
+      type: string
+      description: Estados provisionales pendientes de acuerdo intergrupal.
+      enum: [DRAFT, ACCEPTED, REJECTED, EXPIRED, CANCELLED]
+
+    ContratoManufacturaRequest:
+      type: object
+      additionalProperties: false
+      required: [manufacturer_id, client_id, start_date, end_date, contract_terms]
+      properties:
+        manufacturer_id:
+          $ref: "#/components/schemas/Id"
+        client_id:
+          $ref: "#/components/schemas/Id"
+        start_date:
+          type: string
+          format: date
+          example: "2026-09-01"
+        end_date:
+          type: string
+          format: date
+          example: "2027-08-31"
+        contract_terms:
+          type: string
+          minLength: 1
+          example: Fabricación bajo cotización; cada pedido especifica sus productos.
+
+    ContratoManufactura:
+      type: object
+      additionalProperties: false
+      required:
+        - contract_id
+        - manufacturer_id
+        - client_id
+        - start_date
+        - end_date
+        - contract_terms
+        - status
+      properties:
+        contract_id:
+          $ref: "#/components/schemas/Id"
+        manufacturer_id:
+          $ref: "#/components/schemas/Id"
+        client_id:
+          $ref: "#/components/schemas/Id"
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+        contract_terms:
+          type: string
+          minLength: 1
+        status:
+          $ref: "#/components/schemas/ContractStatus"
+
+    AvailableProduct:
+      type: object
+      additionalProperties: false
+      required:
+        - product_id
+        - manufacturer_id
+        - product_name
+        - available_quantity
+        - unit_price
+        - currency
+      properties:
+        product_id:
+          $ref: "#/components/schemas/Id"
+        manufacturer_id:
+          $ref: "#/components/schemas/Id"
+        product_name:
+          type: string
+          minLength: 1
+          example: Camiseta
+        available_quantity:
+          type: integer
+          minimum: 1
+          example: 120
+        unit_price:
+          type: number
+          format: double
+          minimum: 0
+          multipleOf: 0.01
+          example: 75.00
+        currency:
+          type: string
+          pattern: "^[A-Z]{3}$"
+          example: GTQ
+
+    AvailabilityResponse:
+      type: object
+      additionalProperties: false
+      required: [products]
+      properties:
+        products:
+          type: array
+          items:
+            $ref: "#/components/schemas/AvailableProduct"
+
+    QuotationItemRequest:
+      type: object
+      additionalProperties: false
+      required: [product_id, quantity]
+      properties:
+        product_id:
+          $ref: "#/components/schemas/Id"
+        quantity:
+          type: integer
+          minimum: 1
+          example: 10
+
+    QuotationItem:
+      type: object
+      additionalProperties: false
+      required: [product_id, quantity, unit_price, subtotal]
+      properties:
+        product_id:
+          $ref: "#/components/schemas/Id"
+        quantity:
+          type: integer
+          minimum: 1
+          example: 10
+        unit_price:
+          type: number
+          format: double
+          minimum: 0
+          multipleOf: 0.01
+          example: 75.00
+        subtotal:
+          type: number
+          format: double
+          minimum: 0
+          multipleOf: 0.01
+          example: 750.00
+
+    CotizacionManufacturaRequest:
+      type: object
+      additionalProperties: false
+      required: [contract_id, items]
+      properties:
+        contract_id:
+          $ref: "#/components/schemas/Id"
+        items:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/QuotationItemRequest"
+
+    CotizacionManufactura:
+      type: object
+      additionalProperties: false
+      required: [quotation_id, contract_id, status, currency, items, total]
+      properties:
+        quotation_id:
+          $ref: "#/components/schemas/Id"
+        contract_id:
+          $ref: "#/components/schemas/Id"
+        status:
+          $ref: "#/components/schemas/QuotationStatus"
+        currency:
+          type: string
+          pattern: "^[A-Z]{3}$"
+          example: GTQ
+        items:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/QuotationItem"
+        total:
+          type: number
+          format: double
+          minimum: 0
+          multipleOf: 0.01
+          example: 950.00
+
+  parameters:
+    ContractId:
+      name: contract_id
+      in: path
+      required: true
+      description: Identificador del contrato.
+      schema:
+        $ref: "#/components/schemas/Id"
+
+    QuotationId:
+      name: quotation_id
+      in: path
+      required: true
+      description: Identificador de la cotización.
+      schema:
+        $ref: "#/components/schemas/Id"
+
+    ManufacturerIdQuery:
+      name: manufacturer_id
+      in: query
+      required: false
+      description: Filtrar por fabricante existente.
+      schema:
+        $ref: "#/components/schemas/Id"
+
+    ClientIdQuery:
+      name: client_id
+      in: query
+      required: false
+      description: Filtrar por cliente existente.
+      schema:
+        $ref: "#/components/schemas/Id"
+
+    ProductIdQuery:
+      name: product_id
+      in: query
+      required: false
+      description: Filtrar por producto existente.
+      schema:
+        $ref: "#/components/schemas/Id"
+
+    ContractIdQuery:
+      name: contract_id
+      in: query
+      required: false
+      description: Filtrar cotizaciones por contrato existente.
+      schema:
+        $ref: "#/components/schemas/Id"
+
+    QuantityQuery:
+      name: quantity
+      in: query
+      required: false
+      description: Cantidad mínima requerida; la consulta no reserva unidades.
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+
+    ContractStatusQuery:
+      name: status
+      in: query
+      required: false
+      schema:
+        $ref: "#/components/schemas/ContractStatus"
+
+    QuotationStatusQuery:
+      name: status
+      in: query
+      required: false
+      schema:
+        $ref: "#/components/schemas/QuotationStatus"
+
+  headers:
+    Location:
+      description: URI del recurso creado.
+      schema:
+        type: string
+      example: /api/contrato_manufactura/1001
+
+  responses:
+    BadRequest:
+      description: Solicitud inválida por formato, tipo de dato o regla de validación.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: BAD_REQUEST
+            message: La solicitud contiene datos inválidos.
+
+    Unauthorized:
+      description: Autenticación ausente o inválida; aplicará si se aprueba JWT.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: UNAUTHORIZED
+            message: No fue posible autenticar la solicitud.
+
+    NotFound:
+      description: El recurso solicitado por su ruta no existe.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: NOT_FOUND
+            message: No se encontró el recurso solicitado.
+
+    Conflict:
+      description: La operación contradice el estado actual o una regla comercial.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: CONFLICT
+            message: El contrato no está activo o vigente.
+
+    InvalidReference:
+      description: Una entidad referenciada no existe o no pertenece a la relación indicada.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: INVALID_REFERENCE
+            message: El producto no pertenece al fabricante del contrato.
+
+    InternalServerError:
+      description: Error interno sin exposición de detalles técnicos.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: INTERNAL_SERVER_ERROR
+            message: Ocurrió un error interno.
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Preparado para uso futuro; su obligatoriedad está pendiente de acuerdo.
