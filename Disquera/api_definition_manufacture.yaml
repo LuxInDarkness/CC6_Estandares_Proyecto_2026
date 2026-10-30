@@ -1,0 +1,298 @@
+openapi: 3.0.3
+info:
+  title: Records Gateway API - Manufacture Contracts
+  version: 1.0.0
+  description: |
+    Merchandise manufacturing contracts tied to an approved event contract,
+    served through the Records Gateway.
+
+    ## Response envelope
+    All responses use `{ status, message, data }` on success and
+    `{ status, message, details? }` on error.
+servers:
+  - url: http://discografia_IPV4:4000
+    description: Local gateway (replace with the deployed gateway host)
+# The gateway does not require authentication.
+security: []
+tags:
+  - name: Manufacture Contracts
+    description: Merchandise manufacturing proposals tied to an approved event.
+
+paths:
+  /api/manufacture/proposals:
+    post:
+      tags: [Manufacture Contracts]
+      operationId: createManufactureProposal
+      summary: Propose a merchandise manufacturing contract for an event
+      description: |
+        Routed by the label prefix of `id_artist`. Creates a manufacture
+        contract in `Pending` status. The artist must have an event contract
+        for `id_event` and it must be in `Approved` status.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ManufactureProposalRequest'
+            example:
+              id_artist: KNG1
+              id_event: EXT-EVT-2026-999
+              id_manufacture: MFG-001
+              proposed_price: 25000
+              products_description: 500 t-shirts and 200 posters
+      responses:
+        '201':
+          description: Proposal registered in Pending status.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ManufactureProposalData'
+              example:
+                status: success
+                message: Manufacture proposal registered successfully and is in Pending status.
+                data:
+                  id_contract: KNGM-2
+                  id_event: EXT-EVT-2026-999
+                  id_manufacture: MFG-001
+                  status: Pending
+                  proposed_price: 25000
+                  products_description: 500 t-shirts and 200 posters
+        '400':
+          description: Missing fields, or invalid/unknown artist ID prefix.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                missingFields:
+                  value:
+                    status: error
+                    message: Missing mandatory data in the payload.
+                    details:
+                      required: [id_artist, id_event, id_manufacture, proposed_price, products_description]
+                badPrefix:
+                  value:
+                    status: error
+                    message: Invalid or missing artist ID label prefix.
+        '404':
+          description: No event contract found for this artist and event.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status: error
+                message: Event not found for this artist.
+        '409':
+          description: The event contract is not in Approved status.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status: error
+                message: The event must be in Approved status to request merchandise.
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/LabelUnavailable'
+
+  /api/manufacture/{id_contract}:
+    get:
+      tags: [Manufacture Contracts]
+      operationId: getManufactureContract
+      summary: Get a manufacture contract
+      description: Routed by the label prefix of the contract ID.
+      parameters:
+        - name: id_contract
+          in: path
+          required: true
+          description: Manufacture contract Smart Key.
+          schema:
+            type: string
+            pattern: '^[A-Z]+M-[0-9]+$'
+          example: KNGM-2
+      responses:
+        '200':
+          description: Manufacture contract information.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ManufactureContract'
+              example:
+                status: success
+                message: Manufacture contract information retrieved successfully.
+                data:
+                  id_contract: KNGM-2
+                  id_event: EXT-EVT-2026-999
+                  id_manufacture: MFG-001
+                  artist_name: Madonna
+                  status: Pending
+                  proposed_price: 25000
+                  products_description: 500 t-shirts and 200 posters
+                  note: ''
+        '400':
+          description: Invalid contract ID format.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status: error
+                message: Invalid contract ID format.
+        '404':
+          description: Unknown label prefix, or contract not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                unknownPrefix:
+                  value:
+                    status: error
+                    message: Unknown record label prefix.
+                notFound:
+                  value:
+                    status: error
+                    message: Manufacture contract not found.
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/LabelUnavailable'
+
+components:
+  schemas:
+    ArtistId:
+      type: string
+      pattern: '^[A-Z]+[0-9]+$'
+      description: Artist Smart Key.
+      example: KNG1
+
+    ContractStatus:
+      type: string
+      enum: [Pending, Approved, Rejected, Cancelled, Completed]
+      description: |
+        - `Pending`: proposal received, awaiting review.
+        - `Approved`: approved and signed by both parties.
+        - `Rejected`: rejected by the label or the artist.
+        - `Cancelled`: cancelled after approval.
+        - `Completed`: event finished and paid.
+
+    SuccessEnvelope:
+      type: object
+      required: [status, message, data]
+      properties:
+        status:
+          type: string
+          enum: [success]
+        message:
+          type: string
+        data:
+          description: Endpoint-specific payload.
+
+    ErrorResponse:
+      type: object
+      required: [status, message]
+      properties:
+        status:
+          type: string
+          enum: [error]
+        message:
+          type: string
+        details:
+          description: Optional extra information (e.g. list of required fields or an internal error message).
+          oneOf:
+            - type: string
+            - type: object
+              properties:
+                required:
+                  type: array
+                  items:
+                    type: string
+
+    ManufactureProposalRequest:
+      type: object
+      required: [id_artist, id_event, id_manufacture, proposed_price, products_description]
+      properties:
+        id_artist:
+          $ref: '#/components/schemas/ArtistId'
+        id_event:
+          type: string
+          maxLength: 100
+          description: Event with an Approved contract for this artist.
+          example: EXT-EVT-2026-999
+        id_manufacture:
+          type: string
+          maxLength: 100
+          description: Manufacturer identifier from the requesting system.
+          example: MFG-001
+        proposed_price:
+          type: number
+          format: double
+          example: 25000
+        products_description:
+          type: string
+          example: 500 t-shirts and 200 posters
+
+    ManufactureProposalData:
+      type: object
+      required: [id_contract, id_event, id_manufacture, status, proposed_price, products_description]
+      properties:
+        id_contract:
+          type: string
+          description: Manufacture contract Smart Key.
+          example: KNGM-2
+        id_event:
+          type: string
+        id_manufacture:
+          type: string
+        status:
+          $ref: '#/components/schemas/ContractStatus'
+        proposed_price:
+          type: number
+          format: double
+        products_description:
+          type: string
+
+    ManufactureContract:
+      allOf:
+        - $ref: '#/components/schemas/ManufactureProposalData'
+        - type: object
+          required: [artist_name, note]
+          properties:
+            artist_name:
+              type: string
+              example: Madonna
+            note:
+              type: string
+              description: Note from the label; empty string if none.
+
+  responses:
+    InternalError:
+      description: Unexpected error in the gateway or the label service.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            status: error
+            message: Internal Gateway Error. An unexpected failure occurred.
+    LabelUnavailable:
+      description: The target label service is down or timed out.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            status: error
+            message: Service for label KNG is unreachable or timed out.

@@ -1,0 +1,326 @@
+openapi: 3.0.3
+info:
+  title: Records Gateway API - Event Contracts
+  version: 1.0.0
+  description: |
+    Contracts for an artist to perform at an event, served through the
+    Records Gateway.
+
+    ## Response envelope
+    All responses use `{ status, message, data }` on success and
+    `{ status, message, details? }` on error.
+servers:
+  - url: http://discografia_IPV4:4000
+    description: Local gateway (replace with the deployed gateway host)
+# The gateway does not require authentication.
+security: []
+tags:
+  - name: Event Contracts
+    description: Proposals for an artist to perform at an event.
+
+paths:
+  /api/event/proposals:
+    post:
+      tags: [Event Contracts]
+      operationId: createEventProposal
+      summary: Propose a contract for an artist to perform at an event
+      description: |
+        Routed by the label prefix of `id_artist`. Creates an event contract in
+        `Pending` status. The artist must have a price configured for the given
+        event type (see `GET /api/artists/{id_artist}/pricing`), and there must
+        not already be a Pending, Approved or Completed contract for the same
+        artist and event.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EventProposalRequest'
+            example:
+              id_artist: KNG1
+              id_event: EXT-EVT-2026-999
+              id_event_type: 1
+              proposed_price: 1500000
+              event_datetime: 15-11-2026 20:30
+              is_requested: false
+      responses:
+        '201':
+          description: Proposal registered in Pending status.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/EventProposalData'
+              example:
+                status: success
+                message: Contract proposal registered successfully and is in Pending status.
+                data:
+                  id_contract: KNGC-4
+                  id_event: EXT-EVT-2026-999
+                  status: Pending
+                  proposed_price: 1500000
+                  event_datetime: 15-11-2026 20:30
+        '400':
+          description: Missing fields, invalid date format, or invalid/unknown artist ID prefix.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                missingFields:
+                  value:
+                    status: error
+                    message: Missing mandatory data in the payload.
+                    details:
+                      required: [id_artist, id_event, id_event_type, proposed_price, event_datetime]
+                badDate:
+                  value:
+                    status: error
+                    message: Invalid date format. Use DD-MM-YYYY HH:mm.
+                badPrefix:
+                  value:
+                    status: error
+                    message: Invalid or missing artist ID label prefix.
+        '404':
+          description: The artist has no price configured for this event type.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status: error
+                message: The artist does not have a rate or catalog configured for this event type.
+        '409':
+          description: An active proposal already exists for this artist and event.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status: error
+                message: 'A contract proposal for this artist and event already exists with status: Pending.'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/LabelUnavailable'
+
+  /api/event/{id_event}:
+    get:
+      tags: [Event Contracts]
+      operationId: getEventContract
+      summary: Get an event contract
+      description: |
+        Routed by the label prefix of the contract ID.
+
+        **Note:** despite the path parameter name, this endpoint expects the
+        **event contract ID** returned by `POST /api/event/proposals`
+        (e.g. `KNGC-4`), not the external `id_event`.
+      parameters:
+        - name: id_event
+          in: path
+          required: true
+          description: Event contract Smart Key.
+          schema:
+            type: string
+            pattern: '^[A-Z]+C-[0-9]+$'
+          example: KNGC-4
+      responses:
+        '200':
+          description: Contract information.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/EventContract'
+              example:
+                status: success
+                message: Contract information retrieved successfully.
+                data:
+                  id_contract: KNGC-4
+                  id_event: EXT-EVT-2026-999
+                  artist_name: Madonna
+                  event_type: Concert
+                  status: Pending
+                  proposed_price: 1500000
+                  event_datetime: 15-11-2026 20:30
+                  note: ''
+        '400':
+          description: Invalid contract ID format.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status: error
+                message: Invalid contract ID format.
+        '404':
+          description: Unknown label prefix, or contract not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                unknownPrefix:
+                  value:
+                    status: error
+                    message: Unknown record label prefix.
+                notFound:
+                  value:
+                    status: error
+                    message: Contract not found.
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/LabelUnavailable'
+
+components:
+  schemas:
+    ArtistId:
+      type: string
+      pattern: '^[A-Z]+[0-9]+$'
+      description: Artist Smart Key.
+      example: KNG1
+
+    DateTimeDMY:
+      type: string
+      pattern: '^[0-9]{2}-[0-9]{2}-[0-9]{4} [0-9]{2}:[0-9]{2}$'
+      description: Date and time in `DD-MM-YYYY HH:mm` format (24h).
+      example: 15-11-2026 20:30
+
+    EventTypeId:
+      type: integer
+      description: |
+        Event type identifier:
+        - `1`: Concert
+        - `2`: Private Event
+        - `3`: Festival
+      example: 1
+
+    ContractStatus:
+      type: string
+      enum: [Pending, Approved, Rejected, Cancelled, Completed]
+      description: |
+        - `Pending`: proposal received, awaiting review.
+        - `Approved`: approved and signed by both parties.
+        - `Rejected`: rejected by the label or the artist.
+        - `Cancelled`: cancelled after approval.
+        - `Completed`: event finished and paid.
+
+    SuccessEnvelope:
+      type: object
+      required: [status, message, data]
+      properties:
+        status:
+          type: string
+          enum: [success]
+        message:
+          type: string
+        data:
+          description: Endpoint-specific payload.
+
+    ErrorResponse:
+      type: object
+      required: [status, message]
+      properties:
+        status:
+          type: string
+          enum: [error]
+        message:
+          type: string
+        details:
+          description: Optional extra information (e.g. list of required fields or an internal error message).
+          oneOf:
+            - type: string
+            - type: object
+              properties:
+                required:
+                  type: array
+                  items:
+                    type: string
+
+    EventProposalRequest:
+      type: object
+      required: [id_artist, id_event, id_event_type, proposed_price, event_datetime]
+      properties:
+        id_artist:
+          $ref: '#/components/schemas/ArtistId'
+        id_event:
+          type: string
+          maxLength: 100
+          description: Event identifier from the requesting system.
+          example: EXT-EVT-2026-999
+        id_event_type:
+          $ref: '#/components/schemas/EventTypeId'
+        proposed_price:
+          type: number
+          format: double
+          example: 1500000
+        event_datetime:
+          $ref: '#/components/schemas/DateTimeDMY'
+        is_requested:
+          type: boolean
+          default: false
+          description: True when the event was requested by the record label.
+
+    EventProposalData:
+      type: object
+      required: [id_contract, id_event, status, proposed_price, event_datetime]
+      properties:
+        id_contract:
+          type: string
+          description: Event contract Smart Key.
+          example: KNGC-4
+        id_event:
+          type: string
+          example: EXT-EVT-2026-999
+        status:
+          $ref: '#/components/schemas/ContractStatus'
+        proposed_price:
+          type: number
+          format: double
+        event_datetime:
+          $ref: '#/components/schemas/DateTimeDMY'
+
+    EventContract:
+      allOf:
+        - $ref: '#/components/schemas/EventProposalData'
+        - type: object
+          required: [artist_name, event_type, note]
+          properties:
+            artist_name:
+              type: string
+              example: Madonna
+            event_type:
+              type: string
+              example: Concert
+            note:
+              type: string
+              description: Note from the label; empty string if none.
+
+  responses:
+    InternalError:
+      description: Unexpected error in the gateway or the label service.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            status: error
+            message: Internal Gateway Error. An unexpected failure occurred.
+    LabelUnavailable:
+      description: The target label service is down or timed out.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            status: error
+            message: Service for label KNG is unreachable or timed out.

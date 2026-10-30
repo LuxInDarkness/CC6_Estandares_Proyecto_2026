@@ -1,0 +1,343 @@
+openapi: 3.0.3
+info:
+  title: Records Gateway API - Artists
+  version: 1.0.0
+  description: |
+    Artist availability and pricing across all record labels, served through
+    the Records Gateway.
+
+    ## Routing modes
+    - **Fan-out** (`/api/artists/availability`): the request is sent to every
+      label and results are merged. If some labels are down or time out, the
+      response is still `200` and `message` lists the labels that could not be
+      reached. If a label rejects the request (`4xx`, e.g. invalid dates), that
+      error is returned as-is. If no label can be reached, the gateway returns
+      `503`.
+    - **Direct routing** (`/api/artists/{id_artist}/pricing`): the request
+      goes only to the label named by the Smart Key. The label's status code
+      and body are passed through unchanged.
+
+    Each upstream call has a 1500 ms timeout.
+
+    ## Response envelope
+    All responses use `{ status, message, data }` on success and
+    `{ status, message, details? }` on error.
+servers:
+  - url: http://discografia_IPV4:4000
+    description: Local gateway (replace with the deployed gateway host)
+# The gateway does not require authentication.
+security: []
+tags:
+  - name: Artists
+    description: Artist availability and pricing across labels.
+
+paths:
+  /api/artists/availability:
+    get:
+      tags: [Artists]
+      operationId: getArtistAvailability
+      summary: List artists available in a date range
+      description: |
+        Fan-out. Returns, for every label, the artists with an active label
+        contract in the range and the dates on which they have no approved
+        event. Artists with no available dates are omitted.
+
+        Constraints: dates in `DD-MM-YYYY`, `start_date` <= `end_date`, and the
+        range cannot exceed 14 days.
+      parameters:
+        - name: start_date
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/DateDMY'
+          example: 14-11-2026
+        - name: end_date
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/DateDMY'
+          example: 18-11-2026
+      responses:
+        '200':
+          description: Availability retrieved (possibly with partial label coverage).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ArtistAvailabilityData'
+              examples:
+                complete:
+                  summary: All labels answered
+                  value:
+                    status: success
+                    message: Artist availability retrieved successfully.
+                    data:
+                      artists:
+                        - record_label: King Label
+                          id_artist: KNG1
+                          artist_name: Madonna
+                          main_genre: Pop
+                          available_dates: [14-11-2026, 15-11-2026, 17-11-2026, 18-11-2026]
+                        - record_label: King Label
+                          id_artist: KNG10
+                          artist_name: Shakira
+                          main_genre: Latin
+                          available_dates: [14-11-2026, 15-11-2026, 16-11-2026, 17-11-2026, 18-11-2026]
+                partial:
+                  summary: One label unreachable
+                  value:
+                    status: success
+                    message: 'Artist availability retrieved successfully. (Partial data. Could not connect to: EMP)'
+                    data:
+                      artists:
+                        - record_label: King Label
+                          id_artist: KNG1
+                          artist_name: Madonna
+                          main_genre: Pop
+                          available_dates: [14-11-2026, 15-11-2026, 17-11-2026, 18-11-2026]
+        '400':
+          description: Missing or invalid dates, or invalid range.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                missing:
+                  value:
+                    status: error
+                    message: The start_date and end_date parameters are required.
+                badFormat:
+                  value:
+                    status: error
+                    message: Invalid or missing date format. Use DD-MM-YYYY.
+                reversed:
+                  value:
+                    status: error
+                    message: start_date cannot be later than end_date.
+                tooLong:
+                  value:
+                    status: error
+                    message: The search range cannot exceed 14 days (2 weeks).
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/AllLabelsUnavailable'
+
+  /api/artists/{id_artist}/pricing:
+    get:
+      tags: [Artists]
+      operationId: getArtistPricing
+      summary: Get an artist's price per event type
+      description: Direct routing by the artist Smart Key. Prices are in USD.
+      parameters:
+        - name: id_artist
+          in: path
+          required: true
+          description: Artist Smart Key.
+          schema:
+            $ref: '#/components/schemas/ArtistId'
+          example: KNG1
+      responses:
+        '200':
+          description: Artist pricing.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ArtistPricingData'
+              example:
+                status: success
+                message: Artist pricing retrieved successfully.
+                data:
+                  artist_name: Madonna
+                  main_genre: Pop
+                  currency: USD
+                  prices:
+                    - id_event_type: 1
+                      event_type: Concert
+                      price: 1500000
+                    - id_event_type: 2
+                      event_type: Private Event
+                      price: 500000
+                    - id_event_type: 3
+                      event_type: Festival
+                      price: 1000000
+        '400':
+          description: Invalid ID format.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                status: error
+                message: Invalid ID format.
+        '404':
+          description: Unknown label prefix, or artist not found in that label.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                unknownPrefix:
+                  value:
+                    status: error
+                    message: Unknown record label prefix.
+                notFound:
+                  value:
+                    status: error
+                    message: Artist not found.
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/LabelUnavailable'
+
+components:
+  schemas:
+    ArtistId:
+      type: string
+      pattern: '^[A-Z]+[0-9]+$'
+      description: Artist Smart Key.
+      example: KNG1
+
+    DateDMY:
+      type: string
+      pattern: '^[0-9]{2}-[0-9]{2}-[0-9]{4}$'
+      description: Date in `DD-MM-YYYY` format.
+      example: 14-11-2026
+
+    EventTypeId:
+      type: integer
+      description: |
+        Event type identifier:
+        - `1`: Concert
+        - `2`: Private Event
+        - `3`: Festival
+      example: 1
+
+    SuccessEnvelope:
+      type: object
+      required: [status, message, data]
+      properties:
+        status:
+          type: string
+          enum: [success]
+        message:
+          type: string
+        data:
+          description: Endpoint-specific payload.
+
+    ErrorResponse:
+      type: object
+      required: [status, message]
+      properties:
+        status:
+          type: string
+          enum: [error]
+        message:
+          type: string
+        details:
+          description: Optional extra information (e.g. an internal error message).
+          oneOf:
+            - type: string
+            - type: object
+
+    ArtistAvailability:
+      type: object
+      required: [id_artist, artist_name, main_genre, available_dates]
+      properties:
+        record_label:
+          type: string
+          description: Name of the label the artist is signed with.
+          example: King Label
+        id_artist:
+          $ref: '#/components/schemas/ArtistId'
+        artist_name:
+          type: string
+          example: Madonna
+        main_genre:
+          type: string
+          description: Genre with the most songs for the artist, or `Unknown`.
+          example: Pop
+        available_dates:
+          type: array
+          description: Dates within the requested range and the artist's label contract with no approved event.
+          items:
+            $ref: '#/components/schemas/DateDMY'
+
+    ArtistAvailabilityData:
+      type: object
+      required: [artists]
+      properties:
+        artists:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArtistAvailability'
+
+    ArtistPrice:
+      type: object
+      required: [id_event_type, event_type, price]
+      properties:
+        id_event_type:
+          $ref: '#/components/schemas/EventTypeId'
+        event_type:
+          type: string
+          example: Concert
+        price:
+          type: number
+          format: double
+          example: 1500000
+
+    ArtistPricingData:
+      type: object
+      required: [artist_name, main_genre, currency, prices]
+      properties:
+        artist_name:
+          type: string
+          example: Madonna
+        main_genre:
+          type: string
+          example: Pop
+        currency:
+          type: string
+          enum: [USD]
+        prices:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArtistPrice'
+
+  responses:
+    InternalError:
+      description: Unexpected error in the gateway or the label service.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            status: error
+            message: Internal Gateway Error. An unexpected failure occurred.
+    LabelUnavailable:
+      description: The target label service is down or timed out.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            status: error
+            message: Service for label KNG is unreachable or timed out.
+    AllLabelsUnavailable:
+      description: No label service could be reached (all down, timed out or failing with 5xx).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            status: error
+            message: All record label services are currently unreachable.
