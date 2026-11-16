@@ -1,0 +1,631 @@
+openapi: 3.0.3
+
+info:
+  title: Event Management API
+  version: 1.0.0
+  description: |
+    Public API for the Event Management system.
+    Internal numeric database IDs are not exposed as public resource identifiers.
+
+servers:
+  - url: http://127.0.0.1:8000/api
+    description: Local development server
+  - url: http://{tailscale_ip}:8000/api
+    description: Private Tailscale network
+    variables:
+      tailscale_ip:
+        default: 100.64.0.1
+        description: Replace with the Django host machine's Tailscale IPv4 address.
+
+tags:
+  - name: Events
+  - name: Sites
+  - name: Discography Contracts
+  - name: Manufacturing Contracts
+  - name: Availability
+
+paths:
+  /events:
+    post:
+      tags: [Events]
+      summary: Create an event
+      operationId: createEvent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EventCreateRequest"
+      responses:
+        "201":
+          description: Event created successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Event"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+
+  /events/{external_id}:
+    get:
+      tags: [Events]
+      summary: Retrieve an event
+      operationId: getEvent
+      parameters:
+        - $ref: "#/components/parameters/ExternalId"
+      responses:
+        "200":
+          description: Event found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Event"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /sites:
+    get:
+      tags: [Sites]
+      summary: List active sites
+      operationId: listSites
+      description: Returns only sites whose status is ACTIVE.
+      responses:
+        "200":
+          description: Active sites.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Site"
+
+  /sites/{external_id}:
+    get:
+      tags: [Sites]
+      summary: Retrieve an active site
+      operationId: getSite
+      parameters:
+        - $ref: "#/components/parameters/ExternalId"
+      responses:
+        "200":
+          description: Site found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Site"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /contracts/discography:
+    post:
+      tags: [Discography Contracts]
+      summary: Create a discography contract
+      operationId: createDiscographyContract
+      description: Public clients may create contracts only in DRAFT or PENDING status.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DiscographyContractWrite"
+      responses:
+        "201":
+          description: Contract created successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiscographyContract"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+
+  /contracts/discography/{external_id}:
+    get:
+      tags: [Discography Contracts]
+      summary: Retrieve a discography contract
+      operationId: getDiscographyContract
+      parameters:
+        - $ref: "#/components/parameters/ExternalId"
+      responses:
+        "200":
+          description: Contract found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiscographyContract"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [Discography Contracts]
+      summary: Update a discography contract
+      operationId: updateDiscographyContract
+      description: Only contracts currently in DRAFT or PENDING may be modified through the public API.
+      parameters:
+        - $ref: "#/components/parameters/ExternalId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DiscographyContractWrite"
+      responses:
+        "200":
+          description: Contract updated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiscographyContract"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /contracts/manufacturing:
+    post:
+      tags: [Manufacturing Contracts]
+      summary: Create a manufacturing contract
+      operationId: createManufacturingContract
+      description: Public clients may create contracts only in DRAFT or PENDING status.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ManufacturingContractWrite"
+      responses:
+        "201":
+          description: Contract created successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ManufacturingContract"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+
+  /contracts/manufacturing/{external_id}:
+    get:
+      tags: [Manufacturing Contracts]
+      summary: Retrieve a manufacturing contract
+      operationId: getManufacturingContract
+      parameters:
+        - $ref: "#/components/parameters/ExternalId"
+      responses:
+        "200":
+          description: Contract found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ManufacturingContract"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [Manufacturing Contracts]
+      summary: Update a manufacturing contract
+      operationId: updateManufacturingContract
+      description: Only contracts currently in DRAFT or PENDING may be modified through the public API.
+      parameters:
+        - $ref: "#/components/parameters/ExternalId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ManufacturingContractWrite"
+      responses:
+        "200":
+          description: Contract updated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ManufacturingContract"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /availability:
+    get:
+      tags: [Availability]
+      summary: List available site dates
+      operationId: getAvailability
+      description: Dates blocked by HOLD or CONFIRMED bookings are excluded.
+      parameters:
+        - name: start_date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          example: "2027-06-01"
+        - name: end_date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          example: "2027-06-10"
+      responses:
+        "200":
+          description: Available site/date records.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AvailabilityResult"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+
+components:
+  parameters:
+    ExternalId:
+      name: external_id
+      in: path
+      required: true
+      description: Immutable public external ID of the resource.
+      schema:
+        type: string
+        minLength: 15
+        maxLength: 15
+
+  responses:
+    ValidationError:
+      description: Request validation failed.
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+    NotFound:
+      description: Resource not found.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              detail:
+                type: string
+          example:
+            detail: Not found.
+
+  schemas:
+    EventCreateRequest:
+      type: object
+      required: [name, start_date, end_date, site_external_ids]
+      properties:
+        name:
+          type: string
+          maxLength: 255
+        description:
+          type: string
+          nullable: true
+        event_type:
+          type: string
+          nullable: true
+          maxLength: 100
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+        site_external_ids:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            pattern: "^SIT[0-9]{12}$"
+
+    Event:
+      type: object
+      required: [external_id, name, status, start_date, end_date, sites, created_at, updated_at]
+      properties:
+        external_id:
+          type: string
+          pattern: "^EVT[0-9]{12}$"
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        event_type:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [PLANNED, CONFIRMED, CANCELLED, COMPLETED]
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+        sites:
+          type: array
+          items:
+            $ref: "#/components/schemas/EventSite"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    EventSite:
+      type: object
+      required: [external_id, name, role]
+      properties:
+        external_id:
+          type: string
+          pattern: "^SIT[0-9]{12}$"
+        name:
+          type: string
+        role:
+          type: string
+
+    Site:
+      type: object
+      required: [external_id, name, status]
+      properties:
+        external_id:
+          type: string
+          pattern: "^SIT[0-9]{12}$"
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        address:
+          type: string
+          nullable: true
+        city:
+          type: string
+          nullable: true
+        state:
+          type: string
+          nullable: true
+        country:
+          type: string
+          nullable: true
+        postal_code:
+          type: string
+          nullable: true
+        latitude:
+          type: string
+          nullable: true
+        longitude:
+          type: string
+          nullable: true
+        capacity:
+          type: integer
+          nullable: true
+          minimum: 0
+        site_type:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [ACTIVE, INACTIVE, MAINTENANCE]
+
+    EntityReference:
+      type: object
+      required: [external_id, name]
+      properties:
+        external_id:
+          type: string
+        name:
+          type: string
+
+    ContractStatus:
+      type: string
+      enum: [DRAFT, PENDING, APPROVED, REJECTED, CANCELLED, FINISHED]
+
+    DiscographyContractWrite:
+      type: object
+      required:
+        - event_external_id
+        - site_external_id
+        - artist_external_id
+        - album_external_id
+        - release_date
+        - contract_terms
+      properties:
+        event_external_id:
+          type: string
+          pattern: "^EVT[0-9]{12}$"
+        site_external_id:
+          type: string
+          pattern: "^SIT[0-9]{12}$"
+        artist_external_id:
+          type: string
+          pattern: "^ART[0-9]{12}$"
+        album_external_id:
+          type: string
+          pattern: "^ALB[0-9]{12}$"
+        record_label_external_id:
+          type: string
+          nullable: true
+          pattern: "^LBL[0-9]{12}$"
+        release_date:
+          type: string
+          format: date
+        start_date:
+          type: string
+          format: date
+          nullable: true
+        end_date:
+          type: string
+          format: date
+          nullable: true
+        contract_terms:
+          type: string
+        status:
+          type: string
+          enum: [DRAFT, PENDING]
+          default: DRAFT
+
+    DiscographyContract:
+      type: object
+      required:
+        - external_id
+        - contract_type
+        - status
+        - event
+        - site
+        - artist
+        - album
+        - release_date
+        - contract_terms
+        - created_at
+        - updated_at
+      properties:
+        external_id:
+          type: string
+          pattern: "^DIS[0-9]{12}$"
+        contract_type:
+          type: string
+          enum: [DISCOGRAPHY]
+        status:
+          $ref: "#/components/schemas/ContractStatus"
+        event:
+          $ref: "#/components/schemas/EntityReference"
+        site:
+          $ref: "#/components/schemas/EntityReference"
+        artist:
+          $ref: "#/components/schemas/EntityReference"
+        album:
+          $ref: "#/components/schemas/EntityReference"
+        record_label:
+          allOf:
+            - $ref: "#/components/schemas/EntityReference"
+          nullable: true
+        release_date:
+          type: string
+          format: date
+        start_date:
+          type: string
+          format: date
+          nullable: true
+        end_date:
+          type: string
+          format: date
+          nullable: true
+        contract_terms:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    ManufacturingContractWrite:
+      type: object
+      required:
+        - event_external_id
+        - site_external_id
+        - manufacturer_external_id
+        - product_external_id
+        - release_date
+        - contract_terms
+      properties:
+        event_external_id:
+          type: string
+          pattern: "^EVT[0-9]{12}$"
+        site_external_id:
+          type: string
+          pattern: "^SIT[0-9]{12}$"
+        manufacturer_external_id:
+          type: string
+          pattern: "^MFR[0-9]{12}$"
+        product_external_id:
+          type: string
+          pattern: "^PRD[0-9]{12}$"
+        release_date:
+          type: string
+          format: date
+        start_date:
+          type: string
+          format: date
+          nullable: true
+        end_date:
+          type: string
+          format: date
+          nullable: true
+        contract_terms:
+          type: string
+        status:
+          type: string
+          enum: [DRAFT, PENDING]
+          default: DRAFT
+
+    ManufacturingContract:
+      type: object
+      required:
+        - external_id
+        - contract_type
+        - status
+        - event
+        - site
+        - manufacturer
+        - product
+        - release_date
+        - contract_terms
+        - created_at
+        - updated_at
+      properties:
+        external_id:
+          type: string
+          pattern: "^MAN[0-9]{12}$"
+        contract_type:
+          type: string
+          enum: [MANUFACTURING]
+        status:
+          $ref: "#/components/schemas/ContractStatus"
+        event:
+          $ref: "#/components/schemas/EntityReference"
+        site:
+          $ref: "#/components/schemas/EntityReference"
+        manufacturer:
+          $ref: "#/components/schemas/EntityReference"
+        product:
+          $ref: "#/components/schemas/EntityReference"
+        release_date:
+          type: string
+          format: date
+        start_date:
+          type: string
+          format: date
+          nullable: true
+        end_date:
+          type: string
+          format: date
+          nullable: true
+        contract_terms:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    AvailabilityResult:
+      type: object
+      required: [site_external_id, location_name, date, price, currency]
+      properties:
+        site_external_id:
+          type: string
+          pattern: "^SIT[0-9]{12}$"
+        location_name:
+          type: string
+        date:
+          type: string
+          format: date
+        price:
+          type: string
+          example: "1250.00"
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
