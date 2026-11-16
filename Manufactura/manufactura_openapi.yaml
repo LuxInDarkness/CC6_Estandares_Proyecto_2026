@@ -1,0 +1,554 @@
+openapi: 3.0.3
+info:
+  title: API Middleware de Manufactura
+  version: 2.0.0
+  description: El middleware sigue validando Approved en Discográfica para Eventos.
+    Solicitudes directas de álbum requieren X-Discography-Key. MAN-B1 devuelve órdenes
+    reales con capacidad; MAN-B2/B3 conservan RECEIVED_TEST hasta integrarse.
+servers:
+- url: /manufactura-middleware
+  description: Mismo servidor de Swagger UI (localhost o Tailscale), bajo htdocs/manufactura-middleware
+- url: http://100.75.29.54/manufactura-middleware
+  description: Instalación Tailscale conocida; la IP puede cambiar
+tags:
+- name: Solicitudes de manufactura
+  description: Recepción de solicitudes, despachos y seguimiento MREQ; un fabricante
+    puede aceptar o rechazar una orden.
+- name: Discografica directa
+  description: Solicitud directa de discos por album; necesita X-Discography-Key independiente
+    de X-Internal-Key.
+paths:
+  /api/manufacture/requests/:
+    post:
+      tags:
+      - Solicitudes de manufactura
+      summary: Registrar y distribuir una solicitud de mercancía
+      description: Valida contrato Approved de Discográfica, crea MREQ y envía a fabricantes.
+        MAN-B1 puede confirmar orden real y reserva; RECEIVED_TEST de B2/B3 solo es
+        recepción.
+      operationId: registerManufactureRequest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ManufactureRequestInput'
+            example:
+              id_event: EXT-EVT-2026-998
+              id_artist: KNG10
+              id_contract: KNGC-1
+              requested_delivery_date: 20-11-2026
+              products:
+              - product_type: VINYL
+                quantity: 200
+      responses:
+        '201':
+          description: Solicitud registrada; intentos de despacho registrados, aunque
+            algunos fabricantes no respondan
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PostSuccess'
+        '400':
+          description: JSON mal formado, datos faltantes, fecha inválida, cantidad
+            no positiva o producto no soportado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Discográfica no encontró el contrato
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Contrato no Approved o identificadores no coincidentes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Servicio de Discográfica inaccesible o respuesta inválida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Error interno, base de datos o configuración interna
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '405':
+          description: Método no permitido (otros métodos distintos de GET/POST)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    get:
+      tags: &id001
+      - Solicitudes de manufactura
+      summary: Consultar una solicitud por parámetro (sin mod_rewrite)
+      description: Consulta el último estado registrado; con refresh=1 se consulta
+        el estado actual de órdenes conocidas de MAN-B1. No se actualizan B2/B3 si
+        siguen en RECEIVED_TEST.
+      operationId: getManufactureRequestByQuery
+      parameters:
+      - name: id_request
+        in: query
+        required: true
+        description: ID de solicitud, ej. MREQ-0001
+        schema:
+          type: string
+          example: MREQ-0001
+      - name: refresh
+        in: query
+        required: false
+        schema:
+          type: integer
+          enum:
+          - 1
+        description: 1 para consultar el estado de MAN-B1 (si hay id_order)
+      responses: &id002
+        '200':
+          description: Solicitud recuperada correctamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetSuccess'
+        '400':
+          description: Falta identificador de solicitud
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Solicitud no encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Error consultando MySQL o configuración
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '405':
+          description: Método no permitido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/manufacture/requests/{id_request}:
+    get:
+      tags: *id001
+      summary: Consultar una solicitud por su ID
+      description: Recupera estado registrado y detalle agrupado por fabricante. El
+        código requiere `id_request` por query string. La variante de ruta `/requests/{id_request}`
+        funciona únicamente si Apache tiene `mod_rewrite` y permite el `.htaccess`
+        incluido. Para un servidor sin rewrite puede usarse directamente `GET /api/manufacture/requests/?id_request=MREQ-0001`.
+        Puede agregarse ?refresh=1 para consultar el estado actual de MAN-B1.
+      operationId: getManufactureRequest
+      parameters:
+      - name: id_request
+        in: path
+        required: true
+        description: Identificador generado por el middleware
+        schema:
+          type: string
+          example: MREQ-0001
+      - name: refresh
+        in: query
+        required: false
+        schema:
+          type: integer
+          enum:
+          - 1
+      responses: *id002
+  /api/manufacture/discography/requests/:
+    post:
+      tags:
+      - Discografica directa
+      summary: Registrar solicitud directa de discos desde Discografica
+      description: Crea MREQ de álbum, requiere X-Discography-Key, y solicita producción
+        en MAN-B1. OrderAccepted reserva capacidad, OrderRejected rechaza y ReceivedTest
+        solo confirma recepción.
+      operationId: createDiscographyAlbumRequest
+      security:
+      - DiscographyKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DiscographyAlbumInput'
+            example:
+              client_request_id: DISCO-REQ-0001
+              id_album: 42
+              id_artist: 7
+              requested_delivery_date: 20-12-2026
+              products:
+              - product_type: VINYL
+                quantity: 200
+              - product_type: CD
+                quantity: 500
+      responses:
+        '201':
+          description: Solicitud creada y despacho intentado, no implica produccion
+        '200':
+          description: Solicitud idempotente existente; no vuelve a despacharse
+        '400':
+          description: Datos incorrectos o ausentes
+        '401':
+          description: Clave X-Discography-Key incorrecta
+        '405':
+          description: Metodo no permitido
+        '409':
+          description: client_request_id reutilizado con datos diferentes
+        '422':
+          description: Producto o cantidad no admitidos
+        '500':
+          description: Error de base de datos
+        '503':
+          description: Clave de Discografica no configurada
+components:
+  schemas:
+    ProductRequest:
+      type: object
+      additionalProperties: true
+      required:
+      - product_type
+      - quantity
+      properties:
+        product_type:
+          type: string
+          description: Código de producto; el middleware normaliza a mayúsculas y
+            quita espacios exteriores
+          enum:
+          - VINYL
+          - CD
+          - CASSETTE
+          - SHIRT
+          - HOODIE
+          - CAP
+          - PIN
+          - POSTER
+          - STICKER
+          example: VINYL
+        quantity:
+          type: integer
+          minimum: 1
+          example: 200
+    ManufactureRequestInput:
+      type: object
+      additionalProperties: true
+      required:
+      - id_event
+      - id_artist
+      - id_contract
+      - requested_delivery_date
+      - products
+      properties:
+        id_event:
+          type: string
+          minLength: 1
+          example: EXT-EVT-2026-998
+        id_artist:
+          type: string
+          minLength: 1
+          description: Campo requerido, pero Discográfica no lo devuelve en su endpoint
+            de validación
+          example: KNG10
+        id_contract:
+          type: string
+          minLength: 1
+          description: ID de contrato de Discográfica, no el contract_id numérico
+            de Eventos
+          example: KNGC-1
+        requested_delivery_date:
+          type: string
+          description: Fecha real válida en formato DD-MM-YYYY (no ISO YYYY-MM-DD)
+          pattern: ^\d{2}-\d{2}-\d{4}$
+          example: 20-11-2026
+        products:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/ProductRequest'
+    ErrorResponse:
+      type: object
+      required:
+      - status
+      - message
+      properties:
+        status:
+          type: string
+          enum:
+          - error
+        message:
+          type: string
+    DispatchProduct:
+      type: object
+      required:
+      - node
+      - product_type
+      - quantity
+      properties:
+        node:
+          type: string
+          enum:
+          - MAN-B1
+          - MAN-B2
+          - MAN-B3
+        product_type:
+          type: string
+        quantity:
+          type: integer
+    DispatchResult:
+      type: object
+      required:
+      - node
+      - status
+      - http_code
+      - message
+      properties:
+        node:
+          type: string
+          example: MAN-B1
+        status:
+          type: string
+          description: 'Resultado de despacho: ReceivedTest es solo recepción; OrderAccepted
+            reserva capacidad; Completed indica finalización informada por fabricante.'
+          enum:
+          - ReceivedTest
+          - NotConfigured
+          - NodeClientError
+          - NodeTimeout
+          - NodeUnreachable
+          - NodeUnauthorized
+          - NodeRejected
+          - NodeServerError
+          - NodeHttpError
+          - NodeInvalidResponse
+          - OrderAccepted
+          - OrderRejected
+          - InProduction
+          - Completed
+          - Cancelled
+        http_code:
+          type: integer
+          description: Código HTTP del fabricante, o 0 si no hubo respuesta
+        message:
+          type: string
+        id_order:
+          type: string
+          nullable: true
+          example: ORD-B1-0001
+          description: Código de orden cuando MAN-B1 genera una orden real
+    PostData:
+      type: object
+      required:
+      - id_request
+      - id_event
+      - contract_validation
+      - status
+      - nodes
+      - dispatch
+      - note
+      properties:
+        id_request:
+          type: string
+          example: MREQ-0001
+        id_event:
+          type: string
+        contract_validation:
+          type: string
+          enum:
+          - Approved
+        status:
+          type: string
+          enum:
+          - UnderReview
+          - Accepted
+          - InProduction
+          - Completed
+          - Rejected
+          - PartiallyAccepted
+          - Cancelled
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/DispatchProduct'
+        dispatch:
+          type: array
+          items:
+            $ref: '#/components/schemas/DispatchResult'
+        note:
+          type: string
+    PostSuccess:
+      type: object
+      required:
+      - status
+      - message
+      - data
+      properties:
+        status:
+          type: string
+          enum:
+          - success
+        message:
+          type: string
+          example: Manufacturing request registered successfully.
+        data:
+          $ref: '#/components/schemas/PostData'
+    NodeProductStatus:
+      type: object
+      required:
+      - product_type
+      - quantity
+      - status
+      properties:
+        product_type:
+          type: string
+        quantity:
+          type: integer
+        status:
+          type: string
+          example: ReceivedTest
+    GetNodeStatus:
+      type: object
+      required:
+      - node
+      - status
+      - products
+      properties:
+        node:
+          type: string
+          enum:
+          - MAN-B1
+          - MAN-B2
+          - MAN-B3
+        status:
+          type: string
+          description: Cuando hay distintos estados en un nodo se utiliza Mixed
+        products:
+          type: array
+          items:
+            $ref: '#/components/schemas/NodeProductStatus'
+        id_order:
+          type: string
+          nullable: true
+          example: ORD-B1-0001
+        message:
+          type: string
+          nullable: true
+    GetData:
+      type: object
+      required:
+      - id_request
+      - id_event
+      - status
+      - nodes
+      properties:
+        id_request:
+          type: string
+          example: MREQ-0001
+        id_event:
+          type: string
+        status:
+          type: string
+          example: UnderReview
+          enum:
+          - UnderReview
+          - Accepted
+          - InProduction
+          - Completed
+          - Rejected
+          - PartiallyAccepted
+          - Cancelled
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/GetNodeStatus'
+    GetSuccess:
+      type: object
+      required:
+      - status
+      - message
+      - data
+      properties:
+        status:
+          type: string
+          enum:
+          - success
+        message:
+          type: string
+          example: Manufacturing request retrieved successfully.
+        data:
+          $ref: '#/components/schemas/GetData'
+    DiscographyAlbumInput:
+      type: object
+      required:
+      - client_request_id
+      - id_album
+      - id_artist
+      - requested_delivery_date
+      - products
+      properties:
+        client_request_id:
+          type: string
+          description: Identificador de la solicitud asignado por Discografica, estable
+            en reintentos
+          maxLength: 100
+        id_album:
+          description: ID del album en Discografica; entero positivo o identificador
+            textual. Se normaliza a texto al guardar.
+          oneOf:
+          - type: integer
+            minimum: 1
+          - type: string
+            minLength: 1
+            maxLength: 100
+          example: 42
+        id_artist:
+          description: ID del artista en Discografica; se conserva junto a id_album
+            para identificar el album dentro de su artista, pero no se verifica la
+            relacion contra Discografica.
+          oneOf:
+          - type: integer
+            minimum: 1
+          - type: string
+            minLength: 1
+            maxLength: 100
+          example: 7
+        requested_delivery_date:
+          type: string
+          pattern: ^\d{2}-\d{2}-\d{4}$
+          example: 20-12-2026
+        products:
+          type: array
+          minItems: 1
+          maxItems: 30
+          items:
+            type: object
+            required:
+            - product_type
+            - quantity
+            properties:
+              product_type:
+                type: string
+                enum:
+                - VINYL
+                - CD
+                - CASSETTE
+              quantity:
+                type: integer
+                minimum: 1
+                maximum: 1000000
+  securitySchemes:
+    DiscographyKey:
+      type: apiKey
+      in: header
+      name: X-Discography-Key
