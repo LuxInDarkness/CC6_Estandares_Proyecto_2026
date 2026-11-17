@@ -1,27 +1,42 @@
 openapi: 3.0.3
 info:
   title: Records Gateway API - Artists
-  version: 1.0.0
+  version: 1.1.0
   description: |
     Artist availability and pricing across all record labels, served through
     the Records Gateway.
 
     ## Routing modes
     - **Fan-out** (`/api/artists/availability`): the request is sent to every
-      label and results are merged. If some labels are down or time out, the
-      response is still `200` and `message` lists the labels that could not be
-      reached. If a label rejects the request (`4xx`, e.g. invalid dates), that
-      error is returned as-is. If no label can be reached, the gateway returns
-      `503`.
+      label and results are merged.
+      - If at least one label answers successfully, the response is `200`
+        with the merged data; labels that did not contribute are listed in
+        `message` after `Could not connect to`: unreachable labels by code
+        (`EMP`) and labels that answered with an error with their status
+        (`EMP (404)`). Clients can detect partial results by looking for the
+        phrase `Could not connect`.
+      - If no label answered successfully and one of them returned a `4xx`
+        (e.g. invalid dates), that error is returned as-is.
+      - If no label can be reached, the gateway returns `503`.
     - **Direct routing** (`/api/artists/{id_artist}/pricing`): the request
       goes only to the label named by the Smart Key. The label's status code
       and body are passed through unchanged.
 
     Each upstream call has a 1500 ms timeout.
 
+    ## Smart Keys
+    IDs carry the label prefix (`KNG1`, `KNGC-4`, `KNGM-2`) and are
+    case-insensitive: the gateway upper-cases them before routing and
+    forwards them upper-cased (`kng1` → `KNG1`).
+
     ## Response envelope
     All responses use `{ status, message, data }` on success and
     `{ status, message, details? }` on error.
+
+    ## Changes in 1.1.0
+    - Fan-out: partial results when a single label answers with an error;
+      the `4xx` is returned only if no label answered successfully.
+    - Smart Keys are case-insensitive.
 servers:
   - url: http://discografia_IPV4:4000
     description: Local gateway (replace with the deployed gateway host)
@@ -88,7 +103,7 @@ paths:
                           main_genre: Latin
                           available_dates: [14-11-2026, 15-11-2026, 16-11-2026, 17-11-2026, 18-11-2026]
                 partial:
-                  summary: One label unreachable
+                  summary: One label unreachable (a label answering with an error is listed as `EMP (404)`)
                   value:
                     status: success
                     message: 'Artist availability retrieved successfully. (Partial data. Could not connect to: EMP)'
@@ -203,8 +218,8 @@ components:
   schemas:
     ArtistId:
       type: string
-      pattern: '^[A-Z]+[0-9]+$'
-      description: Artist Smart Key.
+      pattern: '^[A-Za-z]+[0-9]+$'
+      description: Artist Smart Key (case-insensitive; the gateway upper-cases it).
       example: KNG1
 
     DateDMY:

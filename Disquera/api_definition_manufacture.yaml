@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Records Gateway API - Manufacture Contracts
-  version: 1.0.0
+  version: 1.1.0
   description: |
     Merchandise manufacturing contracts tied to an approved event contract,
     served through the Records Gateway.
@@ -9,6 +9,17 @@ info:
     ## Response envelope
     All responses use `{ status, message, data }` on success and
     `{ status, message, details? }` on error.
+
+    ## Smart Keys
+    IDs carry the label prefix (`KNG1`, `KNGC-4`, `KNGM-2`) and are
+    case-insensitive: the gateway upper-cases them before routing and
+    forwards them upper-cased (`kng1` → `KNG1`).
+
+    ## Changes in 1.1.0
+    - Contract status `Completed` renamed to `Finished` (same id, 5).
+    - `/api/manufacture/proposals` only accepts `POST`; any other method returns `404`.
+    - The event requirement is met if **any** of the artist's contracts for `id_event` is `Approved`.
+    - Smart Keys are case-insensitive; a numeric or missing `id_artist` returns `400`.
 servers:
   - url: http://discografia_IPV4:4000
     description: Local gateway (replace with the deployed gateway host)
@@ -25,9 +36,11 @@ paths:
       operationId: createManufactureProposal
       summary: Propose a merchandise manufacturing contract for an event
       description: |
+        Only `POST` is accepted (other methods return `404`).
         Routed by the label prefix of `id_artist`. Creates a manufacture
         contract in `Pending` status. The artist must have an event contract
-        for `id_event` and it must be in `Approved` status.
+        for `id_event`, and at least one of the artist's contracts for that
+        event must be in `Approved` status.
       requestBody:
         required: true
         content:
@@ -180,13 +193,13 @@ components:
 
     ContractStatus:
       type: string
-      enum: [Pending, Approved, Rejected, Cancelled, Completed]
+      enum: [Pending, Approved, Rejected, Cancelled, Finished]
       description: |
         - `Pending`: proposal received, awaiting review.
         - `Approved`: approved and signed by both parties.
         - `Rejected`: rejected by the label or the artist.
         - `Cancelled`: cancelled after approval.
-        - `Completed`: event finished and paid.
+        - `Finished`: event finished and paid (formerly `Completed`).
 
     SuccessEnvelope:
       type: object
